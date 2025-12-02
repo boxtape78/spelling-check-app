@@ -8,13 +8,22 @@ import zipfile
 import csv
 from collections import Counter
 
-# --- NLTK 설정 ---
+# --- NLTK 설정 (punkt_tab 추가) ---
 @st.cache_resource
 def setup_nltk():
+    # 1. 기존 punkt
     try:
         nltk.data.find('tokenizers/punkt')
     except LookupError:
         nltk.download('punkt')
+    
+    # 2. 추가된 punkt_tab (이게 없어서 에러가 났던 것!)
+    try:
+        nltk.data.find('tokenizers/punkt_tab')
+    except LookupError:
+        nltk.download('punkt_tab')
+
+    # 3. 태거
     try:
         nltk.data.find('taggers/averaged_perceptron_tagger')
     except LookupError:
