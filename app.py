@@ -8,26 +8,32 @@ import zipfile
 import csv
 from collections import Counter
 
-# --- NLTK 설정 (punkt_tab 추가) ---
+# --- NLTK 설정 (최신 버전 호환성 완벽 대비) ---
 @st.cache_resource
 def setup_nltk():
-    # 1. 기존 punkt
+    # 1. 문장 분리기 (기본)
     try:
         nltk.data.find('tokenizers/punkt')
     except LookupError:
         nltk.download('punkt')
     
-    # 2. 추가된 punkt_tab (이게 없어서 에러가 났던 것!)
+    # 2. 문장 분리기 (최신 버전용 추가 데이터)
     try:
         nltk.data.find('tokenizers/punkt_tab')
     except LookupError:
         nltk.download('punkt_tab')
 
-    # 3. 태거
+    # 3. 품사 태거 (기본)
     try:
         nltk.data.find('taggers/averaged_perceptron_tagger')
     except LookupError:
         nltk.download('averaged_perceptron_tagger')
+
+    # 4. 품사 태거 (최신 버전용 영어 데이터 - 이게 없어서 에러 발생!)
+    try:
+        nltk.data.find('taggers/averaged_perceptron_tagger_eng')
+    except LookupError:
+        nltk.download('averaged_perceptron_tagger_eng')
 
 setup_nltk()
 
@@ -77,6 +83,7 @@ def analyze_and_correct(text, spell):
 
     corrected_text = detok.detokenize([t if isinstance(t, str) else "" for t in corrected_tokens])
     
+    # 품사 분석
     pos_tags = nltk.pos_tag(misspelled_list)
     pos_profile = Counter(tag for word, tag in pos_tags)
 
