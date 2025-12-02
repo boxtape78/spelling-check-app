@@ -1,177 +1,132 @@
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": 3,
-   "id": "3d290537-d190-4286-bd12-f1bf5db08463",
-   "metadata": {},
-   "outputs": [
-    {
-     "name": "stdout",
-     "output_type": "stream",
-     "text": [
-      "Overwriting app.py\n"
-     ]
-    }
-   ],
-   "source": [
-    "%%writefile app.py\n",
-    "import streamlit as st\n",
-    "from spellchecker import SpellChecker\n",
-    "import nltk\n",
-    "from nltk.tokenize import word_tokenize\n",
-    "from nltk.tokenize.treebank import TreebankWordDetokenizer\n",
-    "import io\n",
-    "import zipfile\n",
-    "import csv\n",
-    "from datetime import datetime\n",
-    "from collections import Counter\n",
-    "\n",
-    "# --- NLTK 설정 ---\n",
-    "@st.cache_resource\n",
-    "def setup_nltk():\n",
-    "    try:\n",
-    "        nltk.data.find('tokenizers/punkt')\n",
-    "    except LookupError:\n",
-    "        nltk.download('punkt')\n",
-    "    try:\n",
-    "        nltk.data.find('taggers/averaged_perceptron_tagger')\n",
-    "    except LookupError:\n",
-    "        nltk.download('averaged_perceptron_tagger')\n",
-    "\n",
-    "setup_nltk()\n",
-    "\n",
-    "# --- 핵심 로직 ---\n",
-    "def tokenize_text(text):\n",
-    "    return word_tokenize(text)\n",
-    "\n",
-    "def is_candidate_word(tok):\n",
-    "    return isinstance(tok, str) and tok.isalpha() and len(tok) > 2 and not tok.isupper()\n",
-    "\n",
-    "def count_real_words(text):\n",
-    "    return sum(1 for t in tokenize_text(text) if is_candidate_word(t))\n",
-    "\n",
-    "def analyze_and_correct(text, spell):\n",
-    "    tokens = tokenize_text(text)\n",
-    "    candidate_indices = [i for i, t in enumerate(tokens) if is_candidate_word(t)]\n",
-    "    candidate_words = [tokens[i].lower() for i in candidate_indices]\n",
-    "    misspelled_set = spell.unknown(candidate_words)\n",
-    "\n",
-    "    corrections = {}\n",
-    "    error_count = 0\n",
-    "    misspelled_list = []\n",
-    "    \n",
-    "    detok = TreebankWordDetokenizer()\n",
-    "    corrected_tokens = list(tokens)\n",
-    "\n",
-    "    for idx, lw in zip(candidate_indices, candidate_words):\n",
-    "        if lw in misspelled_set:\n",
-    "            surface = tokens[idx]\n",
-    "            suggestion = spell.correction(lw)\n",
-    "            if not suggestion: \n",
-    "                suggestion = surface\n",
-    "            \n",
-    "            corrections.setdefault(surface, suggestion)\n",
-    "            error_count += 1\n",
-    "            misspelled_list.append(surface)\n",
-    "            \n",
-    "            if surface.istitle():\n",
-    "                final_word = suggestion.capitalize()\n",
-    "            elif surface.isupper():\n",
-    "                final_word = suggestion.upper()\n",
-    "            else:\n",
-    "                final_word = suggestion\n",
-    "\n",
-    "            corrected_tokens[idx] = final_word\n",
-    "\n",
-    "    corrected_text = detok.detokenize([t if isinstance(t, str) else \"\" for t in corrected_tokens])\n",
-    "    \n",
-    "    pos_tags = nltk.pos_tag(misspelled_list)\n",
-    "    pos_profile = Counter(tag for word, tag in pos_tags)\n",
-    "\n",
-    "    return corrected_text, corrections, error_count, pos_profile\n",
-    "\n",
-    "# --- Streamlit 화면 구성 ---\n",
-    "st.title(\"📝 Spelling Checker & Profiler\")\n",
-    "st.markdown(\"여러 개의 `.txt` 파일을 업로드하면 스펠링을 교정하고 분석 리포트를 제공합니다.\")\n",
-    "\n",
-    "uploaded_files = st.file_uploader(\"검사할 텍스트 파일들을 선택하세요\", type=\"txt\", accept_multiple_files=True)\n",
-    "\n",
-    "if uploaded_files:\n",
-    "    if st.button(\"스펠링 검사 시작\"):\n",
-    "        spell = SpellChecker()\n",
-    "        zip_buffer = io.BytesIO()\n",
-    "        error_summary = []\n",
-    "        all_pos_profile = Counter()\n",
-    "        \n",
-    "        with zipfile.ZipFile(zip_buffer, \"w\") as zf:\n",
-    "            progress_bar = st.progress(0)\n",
-    "            \n",
-    "            for i, uploaded_file in enumerate(uploaded_files):\n",
-    "                original_text = uploaded_file.getvalue().decode(\"utf-8\", errors=\"replace\")\n",
-    "                filename = uploaded_file.name\n",
-    "                \n",
-    "                corrected_text, corrections, err_count, pos_profile = analyze_and_correct(original_text, spell)\n",
-    "                all_pos_profile.update(pos_profile)\n",
-    "                \n",
-    "                zf.writestr(f\"corrected_{filename}\", corrected_text)\n",
-    "                \n",
-    "                total_words = count_real_words(original_text)\n",
-    "                error_rate = (err_count / total_words * 100) if total_words > 0 else 0\n",
-    "                error_summary.append([filename, total_words, err_count, f\"{error_rate:.2f}%\"])\n",
-    "                \n",
-    "                progress_bar.progress((i + 1) / len(uploaded_files))\n",
-    "\n",
-    "            csv_buffer = io.StringIO()\n",
-    "            writer = csv.writer(csv_buffer)\n",
-    "            writer.writerow(['Filename', 'Total Words', 'Error Count', 'Error Rate'])\n",
-    "            writer.writerows(error_summary)\n",
-    "            zf.writestr(\"summary_report.csv\", csv_buffer.getvalue())\n",
-    "            \n",
-    "            txt_report = \"Total POS Error Profile:\\n\"\n",
-    "            for tag, count in all_pos_profile.most_common():\n",
-    "                txt_report += f\"{tag}: {count}\\n\"\n",
-    "            zf.writestr(\"pos_analysis_report.txt\", txt_report)\n",
-    "\n",
-    "        st.success(\"✅ 분석 완료!\")\n",
-    "        st.download_button(\n",
-    "            label=\"결과 파일 다운로드 (ZIP)\",\n",
-    "            data=zip_buffer.getvalue(),\n",
-    "            file_name=\"spelling_check_results.zip\",\n",
-    "            mime=\"application/zip\"\n",
-    "        )\n",
-    "        st.write(\"### 📊 전체 오류 품사 통계\")\n",
-    "        st.write(all_pos_profile)"
-   ]
-  },
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "id": "adc895b1-dd69-4cd2-84b9-cd9c38a200a9",
-   "metadata": {},
-   "outputs": [],
-   "source": []
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python [conda env:base] *",
-   "language": "python",
-   "name": "conda-base-py"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 3
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython3",
-   "version": "3.13.5"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 5
-}
+import streamlit as st
+from spellchecker import SpellChecker
+import nltk
+from nltk.tokenize import word_tokenize
+from nltk.tokenize.treebank import TreebankWordDetokenizer
+import io
+import zipfile
+import csv
+from collections import Counter
+
+# --- NLTK 설정 (캐싱하여 속도 향상) ---
+@st.cache_resource
+def setup_nltk():
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt')
+    try:
+        nltk.data.find('taggers/averaged_perceptron_tagger')
+    except LookupError:
+        nltk.download('averaged_perceptron_tagger')
+
+setup_nltk()
+
+# --- 핵심 로직 ---
+def tokenize_text(text):
+    return word_tokenize(text)
+
+def is_candidate_word(tok):
+    return isinstance(tok, str) and tok.isalpha() and len(tok) > 2 and not tok.isupper()
+
+def count_real_words(text):
+    return sum(1 for t in tokenize_text(text) if is_candidate_word(t))
+
+def analyze_and_correct(text, spell):
+    tokens = tokenize_text(text)
+    candidate_indices = [i for i, t in enumerate(tokens) if is_candidate_word(t)]
+    candidate_words = [tokens[i].lower() for i in candidate_indices]
+    misspelled_set = spell.unknown(candidate_words)
+
+    corrections = {}
+    error_count = 0
+    misspelled_list = []
+    
+    detok = TreebankWordDetokenizer()
+    corrected_tokens = list(tokens)
+
+    for idx, lw in zip(candidate_indices, candidate_words):
+        if lw in misspelled_set:
+            surface = tokens[idx]
+            suggestion = spell.correction(lw)
+            
+            if not suggestion: 
+                suggestion = surface
+                
+            corrections.setdefault(surface, suggestion)
+            error_count += 1
+            misspelled_list.append(surface)
+            
+            if surface.istitle():
+                final_word = suggestion.capitalize()
+            elif surface.isupper():
+                final_word = suggestion.upper()
+            else:
+                final_word = suggestion
+
+            corrected_tokens[idx] = final_word
+
+    corrected_text = detok.detokenize([t if isinstance(t, str) else "" for t in corrected_tokens])
+    
+    pos_tags = nltk.pos_tag(misspelled_list)
+    pos_profile = Counter(tag for word, tag in pos_tags)
+
+    return corrected_text, corrections, error_count, pos_profile
+
+# --- Streamlit 화면 구성 ---
+st.title("📝 Spelling Checker & Profiler")
+st.markdown("여러 개의 `.txt` 파일을 업로드하면 스펠링을 교정하고 분석 리포트를 제공합니다.")
+
+uploaded_files = st.file_uploader("검사할 텍스트 파일들을 선택하세요", type="txt", accept_multiple_files=True)
+
+if uploaded_files:
+    if st.button("스펠링 검사 시작"):
+        spell = SpellChecker()
+        
+        # 결과물을 모을 ZIP 파일 생성 준비
+        zip_buffer = io.BytesIO()
+        
+        error_summary = []
+        all_pos_profile = Counter()
+        
+        with zipfile.ZipFile(zip_buffer, "w") as zf:
+            progress_bar = st.progress(0)
+            
+            for i, uploaded_file in enumerate(uploaded_files):
+                # 1. 파일 읽기
+                original_text = uploaded_file.getvalue().decode("utf-8", errors="replace")
+                filename = uploaded_file.name
+                
+                # 2. 분석 및 교정
+                corrected_text, corrections, err_count, pos_profile = analyze_and_correct(original_text, spell)
+                all_pos_profile.update(pos_profile)
+                
+                # 3. 교정된 파일 ZIP에 추가
+                zf.writestr(f"corrected_{filename}", corrected_text)
+                
+                # 4. 요약 정보 저장
+                total_words = count_real_words(original_text)
+                error_rate = (err_count / total_words * 100) if total_words > 0 else 0
+                error_summary.append([filename, total_words, err_count, f"{error_rate:.2f}%"])
+                
+                # 진행률 업데이트
+                progress_bar.progress((i + 1) / len(uploaded_files))
+
+            # 5. CSV 리포트 생성 및 ZIP에 추가
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+            writer.writerow(['Filename', 'Total Words', 'Error Count', 'Error Rate'])
+            writer.writerows(error_summary)
+            zf.writestr("summary_report.csv", csv_buffer.getvalue())
+            
+            # 6. 텍스트 리포트(품사 분석 포함) 생성 및 ZIP에 추가
+            txt_report = "Total POS Error Profile:\n"
+            for tag, count in all_pos_profile.most_common():
+                txt_report += f"{tag}: {count}\n"
+            zf.writestr("pos_analysis_report.txt", txt_report)
+
+        st.success("✅ 분석 완료!")
+        
+        # 다운로드 버튼 표시
+        st.download_button(
+            label="결과
