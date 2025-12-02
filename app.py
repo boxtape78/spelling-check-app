@@ -8,7 +8,7 @@ import zipfile
 import csv
 from collections import Counter
 
-# --- NLTK 설정 (캐싱하여 속도 향상) ---
+# --- NLTK 설정 ---
 @st.cache_resource
 def setup_nltk():
     try:
@@ -74,13 +74,13 @@ def analyze_and_correct(text, spell):
     return corrected_text, corrections, error_count, pos_profile
 
 # --- Streamlit 화면 구성 ---
-st.title("📝 Spelling Checker & Profiler")
-st.markdown("여러 개의 `.txt` 파일을 업로드하면 스펠링을 교정하고 분석 리포트를 제공합니다.")
+st.title("Spelling Checker & Profiler")
+st.markdown("Upload multiple `.txt` files to check spelling and analyze errors.")
 
-uploaded_files = st.file_uploader("검사할 텍스트 파일들을 선택하세요", type="txt", accept_multiple_files=True)
+uploaded_files = st.file_uploader("Choose txt files", type="txt", accept_multiple_files=True)
 
 if uploaded_files:
-    if st.button("스펠링 검사 시작"):
+    if st.button("Start Analysis"):
         spell = SpellChecker()
         
         # 결과물을 모을 ZIP 파일 생성 준비
@@ -125,8 +125,16 @@ if uploaded_files:
                 txt_report += f"{tag}: {count}\n"
             zf.writestr("pos_analysis_report.txt", txt_report)
 
-        st.success("✅ 분석 완료!")
+        st.success("Analysis Complete!")
         
-        # 다운로드 버튼 표시
+        # 다운로드 버튼
         st.download_button(
-            label="결과
+            label="Download Result (ZIP)",
+            data=zip_buffer.getvalue(),
+            file_name="spelling_check_results.zip",
+            mime="application/zip"
+        )
+        
+        # 화면에 간단한 결과 표시
+        st.write("### Error POS Profile")
+        st.write(all_pos_profile)
